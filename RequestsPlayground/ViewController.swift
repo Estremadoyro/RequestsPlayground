@@ -50,7 +50,7 @@ final class ViewController: UIViewController {
 }
 
 final class NetworkManager {
-    func makeRequest(completion: @escaping (Player?, HTTPURLResponse?, NetworkError?) -> Void) {
+    func makeRequest(completion: @escaping (CustomResult<Player, NetworkError>) -> Void) {
         // Create the HTTP Session (URLSession & configure it)
         let httpSessionConfiguration: URLSessionConfiguration = .ephemeral
         let httpSession = URLSession(configuration: httpSessionConfiguration)
@@ -58,7 +58,7 @@ final class NetworkManager {
         // Create the HTTP Request (URLRequest)
         let urlString: String = "https://lol-friends-server.herokuapp.com/api/v1.1/summoner/la2/runewolf"
         guard let url = URL(string: urlString) else {
-            completion(nil, nil, NetworkError.urlError)
+            completion(.error(.urlError))
             return
         }
         var httpRequest = URLRequest(url: url)
@@ -77,38 +77,30 @@ final class NetworkManager {
         // Create the HTTP Task
         let httpTask = httpSession.dataTask(with: httpRequest) { data, response, error in
             // Check if there was an error (Front-end)
-            if let error = error {
-                print("senku [Network] \(String(describing: type(of: self))) - Error: \(error)")
-                completion(nil, nil, NetworkError.requestError)
-                return
-            }
+            guard error == nil else { completion(.error(.requestError)); return }
 
             // Check for response code 200
             guard let httpResponse = response as? HTTPURLResponse else {
-                completion(nil, nil, NetworkError.noResponseCode)
+                completion(.error(.noResponseCode))
                 return
             }
             guard httpResponse.statusCode == 200 else {
-                print("senku [Network] \(String(describing: type(of: self))) - Server code different:  \((response  as? HTTPURLResponse)?.statusCode ?? 0)")
-                completion(nil, httpResponse, NetworkError.responseCodeInvalid)
+                completion(.error(.responseCodeInvalid))
                 return
             }
 
             // Check for data existing (payload)
             guard let data = data else {
-                print("senku [DEBUG] \(String(describing: type(of: self))) - Data error")
-                completion(nil, httpResponse, NetworkError.responseDataNil)
+                completion(.error(.responseDataNil))
                 return
             }
 
             // Decode the data
             do {
                 let player = try JSONDecoder().decode(PlayerModel.self, from: data)
-                print("senku [DEBUG] \(String(describing: type(of: self))) - Sucessfuly decoded player")
-                completion(player.player, httpResponse, nil)
+                completion(.success(player.player))
             } catch {
-                print("senku [DEBUG] \(String(describing: type(of: self))) - Error")
-                completion(nil, httpResponse, NetworkError.decodingError)
+                completion(.error(.decodingError))
             }
         }
         // Run HTTP Task
@@ -119,13 +111,21 @@ final class NetworkManager {
         let queue = DispatchQueue(label: "estremadoyro.net", qos: .userInitiated, attributes: [], autoreleaseFrequency: .inherit, target: .global(qos: .userInitiated))
         queue.async { [weak self] in
             guard let self = self else { return }
-            self.makeRequest { player, response, error in
-                guard error == nil else { return }
-                guard response != nil else { return }
-                if let player = player {
+            self.makeRequest { result in
+                switch result {
+                case .success(let player):
                     print("senku [DEBUG] \(String(describing: type(of: self))) - player: \(player.summonerName) @ \(player.region)")
                     completion(player.summonerName)
+                case .error(let error):
+                    print("senku [DEBUG] \(String(describing: type(of: self))) - error: \(error.rawValue)")
                 }
+                
+//                guard error == nil else { return }
+//                guard response != nil else { return }
+//                if let player = player {
+//                    print("senku [DEBUG] \(String(describing: type(of: self))) - player: \(player.summonerName) @ \(player.region)")
+//                    completion(player.summonerName)
+//                }
             }
         }
     }
@@ -142,9 +142,9 @@ enum NetworkError: String, Error {
 }
 
 // MARK: Result
-enum Result<T> {
-    case success(T)
-    case error(Error)
+@frozen enum CustomResult<Success, Failure: Error> {
+    case success(Success)
+    case error(Failure)
 }
 
 // MARK: - Model
